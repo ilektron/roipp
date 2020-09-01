@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 #include <iostream>
@@ -16,9 +17,10 @@
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <unistd.h> // write(), read(), close()
 
-namespace oipp  {
+namespace roi  {
 
     enum class Opcode : uint8_t {
+        SENSOR = 19,
         START = 128,
         BAUD = 129,
         CONTROL = 130,
@@ -202,10 +204,10 @@ namespace oipp  {
         ~Roomba() {
             stop();
             poweroff();
-            if (_read_thread.joinable()) {
+            if (_read_thread->joinable()) {
                 std::cout << "Shutting down read thread" << std::endl;
                 _cancel = true;
-                _read_thread.join();
+                _read_thread->join();
             }
             // Cleanly exit and close all connections
             if (_port >= 0) {
@@ -240,15 +242,29 @@ namespace oipp  {
             p.push_back(intensity);
             send_packet(p);
         }
-        // TODO needs a command to set multiple LEDs at once
 
         // Stores a song
-        void song() {
-            //std::string p = {static_cast<const char>(Opcode::FULL)};
-            //p.push_back((1 << static_cast<uint8_t>(l)));
-            //p.push_back(color);
-            //p.push_back(intensity);
-            //send_packet(p);
+        void create_song(uint8_t song_num, const std::vector<std::pair<uint8_t, uint8_t>>& song) {
+            constexpr unsigned int MAX_SONG_LEN = 16;
+            if (song.size() > MAX_SONG_LEN) {
+                throw OIException("Song length exceeds maximum");
+            }
+            std::string p = {static_cast<const char>(Opcode::SONG)};
+            p.push_back(song_num);
+            p.push_back(song.size() * 2);
+            for (auto n : song) {
+                p.push_back(n.first);
+                p.push_back(n.second);
+            }
+            send_packet(p);
+        }
+
+        // Plays a song back
+        void play_song(uint8_t song_num) {
+            if (song_num > 4) { throw OIException("Invalid song number"); }
+            std::string p = {static_cast<const char>(Opcode::PLAY)};
+            p.push_back(song_num);
+            send_packet(p);
         }
 
         // Velocity in mm/s (-500 to 500) and radius in mm (-2000 to 2000)
@@ -329,13 +345,18 @@ namespace oipp  {
                 auto response = read_bytes(_packet_len.at(id));
                 return response;
             } else {
-                return "";
+                return _data_packets[id];
             }
         }
 
         // Returns the battery voltage in mV
         unsigned int get_voltage() {
            return sensor(PacketID::VOLTAGE);
+        }
+
+        // Returns the battery voltage in mV
+        unsigned int get_battery_capacity() {
+           return sensor(PacketID::BATTERY_CAPACITY);
         }
 
         int sensor(PacketID id) {
@@ -349,35 +370,16 @@ namespace oipp  {
             return val;
         }
 
-        void stream_data() {
-            _streaming = true;
-            _read_thread = std::thread([&](){
-                    fd_set rfds;
-                    struct timeval tv;
-                    int retval;
-
-                    FD_ZERO(&rfds);
-                    FD_SET(_port, &rfds);
-
-                    tv.tv_sec = 0u;
-                    tv.tv_usec = 10000u;
-
-                    std::array<uint8_t, 1024> buf;
-                    while (!_cancel) {
-                        int c{};
-                        std::string response;
-                        while (select(1, &rfds, nullptr, nullptr, &tv) > 0) {
-                            c = read(_port, buf.data(), buf.size());
-                            response.append(buf.at(0), buf.at(c-1));
-                            std::cout << "Read " << c << " bytes" << std::endl;
-                        }
-                        if (response.size() > 0) {
-                            _responses.push_back(response);
-                            std::cout << "Received response: " << response;
-                        }
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    }
-                    });
+        void stream_data(const std::vector<PacketID>& filter) {
+            // First, stop streaming so that we can start it up again with an updated filter
+            stop_streaming();
+            std::string p = {static_cast<const char>(Opcode::STREAM)};
+            p.push_back(filter.size());
+            for (auto c : filter) {
+                p.push_back(static_cast<char>(c));
+            }
+            send_packet(p);
+            create_read_thread();
         }
 
         void pause() {
@@ -386,6 +388,13 @@ namespace oipp  {
 
         void stop_streaming() {
             _streaming = false;
+
+            if (_read_thread) {
+                // Need to stop so we can start again
+                _cancel = true;
+                _read_thread->join();
+            }
+            _read_thread.reset(nullptr);
         }
 
         void poweroff() {
@@ -400,8 +409,9 @@ namespace oipp  {
 
         std::vector<std::string> _commands;
         std::vector<std::string> _responses;
+        std::map<PacketID, std::string> _data_packets;
 
-        std::thread _read_thread;
+        std::unique_ptr<std::thread> _read_thread;
         std::atomic_bool _cancel;
         bool _streaming;
 
@@ -503,5 +513,44 @@ namespace oipp  {
             return count;
         }
 
+        void create_read_thread() {
+            _streaming = true;
+            _read_thread = std::make_unique<std::thread>([&](){
+                    fd_set rfds;
+                    struct timeval tv;
+                    int retval;
+
+                    FD_ZERO(&rfds);
+                    FD_SET(_port, &rfds);
+
+                    tv.tv_sec = 0u;
+                    tv.tv_usec = 10000u;
+
+                    std::array<uint8_t, 1024> buf;
+                    while (!_cancel) {
+                        int c{};
+                        std::string response;
+                        while (select(1, &rfds, nullptr, nullptr, &tv) > 0) {
+                            c = read(_port, buf.data(), buf.size());
+                            response.append(&buf[0], &buf[c]);
+                            std::cout << "Read " << c << " bytes" << std::endl;
+                        }
+                        if (response.size() > 0) {
+                            _responses.push_back(response);
+                            std::cout << "Received response: " << response << std::endl;
+                        }
+                        // Should parse the response and check if we have a packet
+                        //std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    }
+                    _cancel = false;
+                    });
+
+        }
+
+        // Removes characters from a string that would make a complete streaming data packet if it passes the checksum
+        std::string get_data_packet(std::string& input) {
+            // Throw anything away before the opcode 
+
+        }
     };
 }

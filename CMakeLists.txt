@@ -5,12 +5,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # set the project name
-project(oipp)
+project(oipp_example)
 
 # add the executable
-add_executable(oipp src/oipp_example.cpp)
+add_executable(oipp_example src/oipp_example.cpp)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-target_link_libraries(oipp PRIVATE Threads::Threads)
+target_link_libraries(oipp_example PRIVATE Threads::Threads)
 

@@ -18,12 +18,18 @@ int main(int argc, const char* argv[]) {
     signal(SIGINT, signalHandler);
 
     try {
-        oipp::Roomba roomba("/dev/ttyUSB0");
+        roi::Roomba roomba("/dev/ttyUSB0");
 
         std::cout << "Starting roomba..." << std::endl;
 
         // Need to set a mode other than just passive
         roomba.safe();
+
+        roomba.drive_direct(100, -100);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+        roomba.drive_direct(-100, 100);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
         std::cout << std::dec << roomba.get_voltage() << "mV" << std::endl;
 
