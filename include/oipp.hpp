@@ -40,7 +40,7 @@ namespace roi  {
         PLAY = 141,
         STREAM = 148,
         QUERY_LIST = 149,
-        DO_STREAM = 150,
+        PAUSE_RESUME = 150,
         QUERY = 142,
         FORCE_SEEKING_DOC = 143,
         SCHEDULING_LEDS = 162,
@@ -137,6 +137,15 @@ namespace roi  {
         GROUP101,
         GROUP106 = 106,
         GROUP107,
+    };
+
+    enum class ChargingState : uint8_t {
+        NOT_CHARGING = 0,
+        RECONDITIONING_CHARGING,
+        FULL_CHARGING,
+        TRICKLE_CHARGING,
+        WAITING,
+        CHARGING_FAULT_CONDITION
     };
 
     class OIException: public std::exception
@@ -251,7 +260,7 @@ namespace roi  {
             }
             std::string p = {static_cast<const char>(Opcode::SONG)};
             p.push_back(song_num);
-            p.push_back(song.size() * 2);
+            p.push_back(song.size());
             for (auto n : song) {
                 p.push_back(n.first);
                 p.push_back(n.second);
@@ -259,12 +268,18 @@ namespace roi  {
             send_packet(p);
         }
 
-        // Plays a song back
-        void play_song(uint8_t song_num) {
+        // Plays a song back that was previously stored
+        void play_song(uint8_t song_num, bool block = true) {
             if (song_num > 4) { throw OIException("Invalid song number"); }
             std::string p = {static_cast<const char>(Opcode::PLAY)};
             p.push_back(song_num);
             send_packet(p);
+            // Should probably set a timeout so this doesn't block indefinitely
+            if (block) {
+                while (get_song_playing()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+            }
         }
 
         // Velocity in mm/s (-500 to 500) and radius in mm (-2000 to 2000)
@@ -325,6 +340,7 @@ namespace roi  {
 
         }
 
+        // Helper function that turns a specific angle
         void turn(int angle) {
 
         }
@@ -354,11 +370,32 @@ namespace roi  {
            return sensor(PacketID::VOLTAGE);
         }
 
-        // Returns the battery voltage in mV
+        // Returns the battery capacity in mAh
         unsigned int get_battery_capacity() {
            return sensor(PacketID::BATTERY_CAPACITY);
         }
 
+        // Returns the battery charge in mAh
+        unsigned int get_battery_charge() {
+           return sensor(PacketID::BATTERY_CHARGE);
+        }
+
+        // Returns the charging state
+        ChargingState get_charging_state() {
+           return static_cast<ChargingState>(sensor(PacketID::BATTERY_CAPACITY));
+        }
+
+        // Returns which song number is playing
+        unsigned int get_song_number() {
+           return sensor(PacketID::SONG_NUMBER);
+        }
+
+        // Returns if a song is playing or not
+        bool get_song_playing() {
+           return sensor(PacketID::SONG_PLAYING);
+        }
+
+        // Get a sensor reading
         int sensor(PacketID id) {
             auto response = query(id);
             print_packet(response);
@@ -370,6 +407,7 @@ namespace roi  {
             return val;
         }
 
+        // Start streaming sensor data
         void stream_data(const std::vector<PacketID>& filter) {
             // First, stop streaming so that we can start it up again with an updated filter
             stop_streaming();
@@ -382,8 +420,18 @@ namespace roi  {
             create_read_thread();
         }
 
-        void pause() {
+        void pause_stream() {
             _streaming = false;
+            std::string p = {static_cast<const char>(Opcode::PAUSE_RESUME)};
+            p.push_back(0);
+            send_packet(p);
+        }
+
+        void resume_stream() {
+            _streaming = false;
+            std::string p = {static_cast<const char>(Opcode::PAUSE_RESUME)};
+            p.push_back(1);
+            send_packet(p);
         }
 
         void stop_streaming() {
@@ -550,7 +598,7 @@ namespace roi  {
         // Removes characters from a string that would make a complete streaming data packet if it passes the checksum
         std::string get_data_packet(std::string& input) {
             // Throw anything away before the opcode 
-
+            return "";
         }
     };
 }

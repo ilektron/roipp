@@ -25,14 +25,21 @@ int main(int argc, const char* argv[]) {
         // Need to set a mode other than just passive
         roomba.safe();
 
-        roomba.drive_direct(100, -100);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-
-        roomba.drive_direct(-100, 100);
+        // Delay a sec
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
         std::cout << std::dec << roomba.get_voltage() << "mV" << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
+        // Let's play a song
+        std::vector<std::pair<uint8_t, uint8_t>> song = {
+            {76, 16}, {76, 16}, {76, 32}, {76, 16}, {76, 16}, {76, 32}, {76, 16}, {79, 16}, {72, 16}, {74, 16}, {76, 32}, {77, 16}, {77, 16}, {77, 16}, {77, 32}, {77, 16}
+        };
+
+        std::cout << "Creating song" << std::endl;
+        roomba.create_song(1, song);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        roomba.play_song(1);
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         roomba.stop();
