@@ -8,6 +8,14 @@
 #include <map>
 #include <functional>
 
+#ifdef DEBUG
+#define IFDEBUG(x_) {x_;}
+#define IFNDEBUG(x_) {}
+#else
+#define IFDEBUG(x_) {}
+#define IFNDEBUG(x_) {x_;}
+#endif
+
 namespace roi  {
 
     enum class Opcode : uint8_t {
@@ -313,6 +321,9 @@ namespace roi  {
 
         // Returns the charging state
         ChargingState get_charging_state();
+
+        // Returns the current operating mode
+        uint8_t get_oi_mode();
 
         // Returns which song number is playing
         uint8_t get_song_number();

@@ -246,9 +246,11 @@ namespace roi  {
             auto response = read_bytes(_packet_len.at(id));
             return response;
         } else {
+            // TODO if the packet is not being recieved, add it to the list
             if (_data_packets.find(id) != _data_packets.end()) {
                 return _data_packets[id];
             } else {
+                // Should throw exception?
                 return "";
             }
         }
@@ -327,6 +329,11 @@ namespace roi  {
     // Returns the charging state
     ChargingState Roomba::get_charging_state() {
         return static_cast<ChargingState>(sensor<uint8_t>(PacketID::BATTERY_CAPACITY));
+    }
+
+    // Returns the current operating mode
+    uint8_t Roomba::get_oi_mode() {
+        return sensor<uint8_t>(PacketID::OPEN_INTERFACE_MODE);
     }
 
     // Returns which song number is playing
@@ -495,7 +502,7 @@ namespace roi  {
         std::string response{};
         while ((c += read(_port, buf.data(), count % buf.size())) <= count) {
             response.append(&buf[0], &buf[c]);
-            //std::cout << "Read " << c << " bytes" << std::endl;
+            IFDEBUG(std::cout << "Read " << c << " bytes" << std::endl);
             if (c == count) {
                 //print_packet(response);
                 break;
@@ -509,44 +516,48 @@ namespace roi  {
         if (_port <=0 ) {
             throw OIException("Unable to send packet. Serial port not open");
         }
-        //std::cout << "Sending packet: ";
-        //print_packet(p);
+        IFDEBUG(std::cout << "Sending packet: " << std::endl);
+        IFDEBUG(print_packet(p));
         auto count = write(_port, p.c_str(), p.length());
         return count;
     }
 
     void Roomba::parse_sensor(std::string data) {
         // We have the data packets, time to map them out
-        if (data.length() > 0) {
+        while (data.length() > 0) {
             try {
                 // the first byte will tell us how big the packet is
-                PacketID packet = static_cast<PacketID>(data[0]);
-                auto len = _packet_len.at(packet);
-                //std::cout << "Packet: " << (int)data[0] << "\tLen: " << len << std::endl;
+                PacketID id = static_cast<PacketID>(data[0]);
+                auto len = _packet_len.at(id);
+                IFDEBUG(std::cout << "Packet: " << (int)data[0] << "\tLen: " << len << std::endl);
                 auto p = data.substr(1,len);
+                data.erase(0, len+1);
 
                 if (len > 2) {
-                    auto next = _packet_len.find(_packet_start.at(packet));
+                    auto next = _packet_len.find(_packet_start.at(id));
                     // Requesting data a packet at a time is high byte first, while streaming is low byte first
                     while (p.length() > 0) {
                         _data_packets[next->first] = p.substr(0, next->second);
-                        //std::cout << (int)next->first << ": ";
-                        //print_packet(_data_packets[next->first]);
-                        //std::cout << "\t";
+                        IFDEBUG(
+                                std::cout << (int)next->first << ": ";
+                                print_packet(_data_packets[next->first]);
+                                std::cout << "\t";)
                         p.erase(0, next->second);
                         next++;
                     }
-                    //std::cout << std::endl;
+                    IFDEBUG(std::cout << std::endl);
                 } else {
-                    _data_packets[packet] = p;
+                    IFDEBUG(
+                            std::cout << (int)id << ": ";
+                            print_packet(_data_packets[id]);
+                            std::cout << "\t";)
+                    _data_packets[id] = p;
+                    p.erase(0, len);
                 }
 
             } catch (std::exception& e) {
                 //std::cout << "Well shit, hit a bump.\n" << e.what() << std::endl;
             }
-        } else {
-
-            //std::cout << "Empty data" << std::endl;
         }
     }
 
@@ -567,15 +578,15 @@ namespace roi  {
                 //std::cout << "Should be long enough for packet length: " << packet_len << std::endl;
                 // n-bytes = start byte + packet len + len(data) + checksum
                 if (response.length() >= packet_len + 3) {
-                    //std::cout << "Packet is complete" << std::endl;
+                    IFDEBUG(std::cout << "Packet is complete" << std::endl);
                     // Sum the bytes of the packet from start to checksum, should equal 0
                     auto cs = std::accumulate(response.begin(), response.begin() + packet_len + 3, 0);
-                    //std::cout << "Checksum: " << cs << std::endl;
+                    IFDEBUG(std::cout << "Checksum: " << cs << std::endl);
                     // Validate the checksum
                     if ((cs & 0xFF) == 0) {
                         // We got a good packet
                         auto data = response.substr(2, packet_len);
-                        //print_packet(data);
+                        IFDEBUG(print_packet(data));
                         parse_sensor(data);
                         if (_callback) {
                             _data_count++;
@@ -605,13 +616,13 @@ namespace roi  {
                     if (c > 0) {
                         response.append(&buf[0], &buf[c]);
                         if (c) {
-                            //std::cout << "Read " << c << " bytes" << std::endl;
+                            IFDEBUG(std::cout << "Read " << c << " bytes" << std::endl);
                         } else {
-                            //std::cout << "No data yet" << std::endl;
+                            IFDEBUG(std::cout << "No data yet" << std::endl);
                         }
                         if (response.size() > 0) {
-                            //std::cout << "Received response: ";
-                            //print_packet(response);
+                            IFDEBUG(std::cout << "Received response: ";
+                                print_packet(response));
                             while (parse_response(response)) {
                                 //std::cout << "Parsed a packet" << std::endl;
                             }

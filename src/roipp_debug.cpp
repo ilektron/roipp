@@ -35,6 +35,7 @@ bool draw_data(roi::Roomba& bot) {
 
 void run_debug(roi::Roomba& bot) {
 
+IFNDEBUG(
     auto win = initscr();
     cbreak();
     noecho();
@@ -42,54 +43,67 @@ void run_debug(roi::Roomba& bot) {
 
     clear();
     mvaddstr(0, 0, "Roomba Debug");
-
+);
     // Could use a semaphore to signal to draw new data
     auto callback = [](roi::Roomba& bot){
         return draw_data(bot);
     };
 
-    bot.stream_data({roi::PacketID::GROUP0}, callback);
+    bot.stream_data({roi::PacketID::GROUP0, roi::PacketID::OPEN_INTERFACE_MODE}, callback);
 
     while (!stop) {
         // Do something, like read input
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         std::string text = "Voltage: " + std::to_string(bot.get_voltage()) + "mV";
-        mvaddstr(1, 0, text.c_str());
+        IFNDEBUG(mvaddstr(1, 0, text.c_str()));
         text = "Current: " + std::to_string(bot.get_current()) + "mA";
-        mvaddstr(2, 0, text.c_str());
+        IFNDEBUG(mvaddstr(2, 0, text.c_str()));
         text = "Battery Charge: " + std::to_string(bot.get_battery_charge()) + "mAh";
-        mvaddstr(3, 0, text.c_str());
+        IFNDEBUG(mvaddstr(3, 0, text.c_str()));
         text = "Battery Capacity: " + std::to_string(bot.get_battery_capacity()) + "mAh";
-        mvaddstr(4, 0, text.c_str());
+        IFNDEBUG(mvaddstr(4, 0, text.c_str()));
         text = "Temperature: " + std::to_string(bot.get_temp()) + "C";
-        mvaddstr(5, 0, text.c_str());
-        text = std::to_string(bot.get_bump_wheel()) + "\tLeft Bumper: " + std::to_string(bot.get_left_bump());
-        text += "\tRight Bumper: " + std::to_string(bot.get_right_bump());
-        mvaddstr(6, 0, text.c_str());
+        IFNDEBUG(mvaddstr(5, 0, text.c_str()));
+        text = std::to_string(bot.get_bump_wheel()) + "\tLBumper: " + std::to_string(bot.get_left_bump());
+        text += "\tRBumper: " + std::to_string(bot.get_right_bump());
+        IFNDEBUG(mvaddstr(6, 0, text.c_str()));
         text = "Left Wheel Drop: " + std::to_string(bot.get_left_wheel_drop());
         text += "\tRight Wheel Drop: " + std::to_string(bot.get_right_wheel_drop());
-        mvaddstr(7, 0, text.c_str());
+        IFNDEBUG(mvaddstr(7, 0, text.c_str()));
         text = "Cliff: " + std::to_string(bot.get_cliff_left()) + "\t" + std::to_string(bot.get_cliff_front_left());
         text += "\t" + std::to_string(bot.get_cliff_front_right()) + "\t" + std::to_string(bot.get_cliff_right());
-        mvaddstr(8, 0, text.c_str());
+        IFNDEBUG(mvaddstr(8, 0, text.c_str()));
+        text = "OI Mode: " + std::to_string(bot.get_oi_mode());
+        IFNDEBUG(mvaddstr(9, 0, text.c_str()));
+IFNDEBUG(
         auto c = getch();
         switch (c) {
             case 'w':
                 bot.drive(100,0);
+                mvaddstr(15, 0, "forward");
                 break;
             case 'a':
                 bot.drive(100,-1);
+                mvaddstr(15, 0, "left");
                 break;
             case 'd':
                 bot.drive(100,1);
+                mvaddstr(15, 0, "right");
                 break;
             case 's':
-                bot.drive(-100,0);
+                bot.safe();
+                mvaddstr(15, 0, "safe");
                 break;
             case 'q':
+                bot.poweroff();
                 stop = true;
                 break;
+            case 'f':
+                bot.full();
+                mvaddstr(15, 0, "full");
+                break;
             case 'l':
+                mvaddstr(15, 0, "leds");
                 bot.leds(0, 255, 255);
                 break;
             case 'r':
@@ -100,8 +114,9 @@ void run_debug(roi::Roomba& bot) {
                 break;
         }
         refresh();
+        );
     }
-    endwin();
+    IFNDEBUG(endwin());
 }
 
 
