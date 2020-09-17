@@ -27,12 +27,11 @@
 namespace roi  {
 
     void print_packet(std::string packet) {
-        return;
-        /*std::cout << std::hex;*/
-        //for (auto c : packet) {
-            //std::cout << "0x" << std::hex << std::setw(2) << std::setfill('0') << (static_cast<unsigned int>(c) & 0xFF) << " ";
-        //}
-        /*std::cout << std::dec << std::endl;*/
+        std::cout << std::hex;
+        for (auto c : packet) {
+            std::cout << "0x" << std::hex << std::setw(2) << std::setfill('0') << (static_cast<unsigned int>(c) & 0xFF) << " ";
+        }
+        std::cout << std::dec << std::endl;
     }
 
     Roomba::Roomba() {
@@ -81,6 +80,9 @@ namespace roi  {
         if (tcsetattr(_port, TCSANOW, &tty) != 0) {
             throw OIException("Error " + std::to_string(errno) + " from tcgetattr: " + strerror(errno));
         }
+
+        // clear out the tty buffer
+        tcflush(_port, TCIOFLUSH);
 
         start();
 
@@ -244,44 +246,97 @@ namespace roi  {
             auto response = read_bytes(_packet_len.at(id));
             return response;
         } else {
-            return _data_packets[id];
+            if (_data_packets.find(id) != _data_packets.end()) {
+                return _data_packets[id];
+            } else {
+                return "";
+            }
         }
     }
+    // Gets the bump sensors and wheel drops
+    uint8_t Roomba::get_bump_wheel() {
+       return sensor<uint8_t>(PacketID::BUMPS_WHEELDROPS);
+    }
+
+    // Gets the right bump
+    bool Roomba::get_right_bump() {
+        return get_bump_wheel() & (1 << 0);
+    }
+    // Gets the left bump
+    bool Roomba::get_left_bump() {
+        return get_bump_wheel() & (1 << 1);
+    }
+    // Gets the right wheel drop
+    bool Roomba::get_right_wheel_drop() {
+        return get_bump_wheel() & (1 << 2);
+    }
+    // Gets the left wheel drop
+    bool Roomba::get_left_wheel_drop() {
+        return get_bump_wheel() & (1 << 3);
+    }
+
+    // Can the roomba see a wall?
+    bool Roomba::get_wall() {
+        return sensor<uint8_t>(PacketID::WALL);
+    }
+
+    // Gets the left cliff
+    bool Roomba::get_cliff_left() {
+        return sensor<uint8_t>(PacketID::CLIFF_LEFT);
+    }
+    // Gets the left front cliff
+    bool Roomba::get_cliff_front_left() {
+        return sensor<uint8_t>(PacketID::CLIFF_FRONT_LEFT);
+    }
+    // Gets the right cliff
+    bool Roomba::get_cliff_right() {
+        return sensor<uint8_t>(PacketID::CLIFF_RIGHT);
+    }
+    // Gets the right front cliff
+    bool Roomba::get_cliff_front_right() {
+        return sensor<uint8_t>(PacketID::CLIFF_FRONT_RIGHT);
+    }
+
 
     // Returns the battery voltage in mV
     uint16_t Roomba::get_voltage() {
-       return sensor<uint16_t>(PacketID::VOLTAGE);
+        return sensor<uint16_t>(PacketID::VOLTAGE);
     }
 
     // Returns the battery voltage in mV
-    uint16_t Roomba::get_current() {
-       return sensor<uint16_t>(PacketID::CURRENT);
+    int16_t Roomba::get_current() {
+        return sensor<int16_t>(PacketID::CURRENT);
+    }
+
+    // Returns the temperature in C from -128 to 127
+    int8_t Roomba::get_temp() {
+        return sensor<int16_t>(PacketID::TEMPERATURE);
     }
 
 
     // Returns the battery capacity in mAh
     uint16_t Roomba::get_battery_capacity() {
-       return sensor<uint16_t>(PacketID::BATTERY_CAPACITY);
+        return sensor<uint16_t>(PacketID::BATTERY_CAPACITY);
     }
 
     // Returns the battery charge in mAh
     uint16_t Roomba::Roomba::get_battery_charge() {
-       return sensor<uint16_t>(PacketID::BATTERY_CHARGE);
+        return sensor<uint16_t>(PacketID::BATTERY_CHARGE);
     }
 
     // Returns the charging state
     ChargingState Roomba::get_charging_state() {
-       return static_cast<ChargingState>(sensor<uint8_t>(PacketID::BATTERY_CAPACITY));
+        return static_cast<ChargingState>(sensor<uint8_t>(PacketID::BATTERY_CAPACITY));
     }
 
     // Returns which song number is playing
     uint8_t Roomba::get_song_number() {
-       return sensor<uint8_t>(PacketID::SONG_NUMBER);
+        return sensor<uint8_t>(PacketID::SONG_NUMBER);
     }
 
     // Returns if a song is playing or not
     bool Roomba::get_song_playing() {
-       return sensor<unsigned int>(PacketID::SONG_PLAYING);
+        return sensor<unsigned int>(PacketID::SONG_PLAYING);
     }
 
     // Get the distance traveled since the last read
@@ -292,7 +347,7 @@ namespace roi  {
 
     // Get the radius traveled since the last read
     // TODO If streaming, need to make sure we aren't just returning the same stuff every time
-    int16_t Roomba::get_radius() {
+    int16_t Roomba::get_angle() {
         return sensor<int16_t>(PacketID::RADIUS);
     }
 
@@ -418,6 +473,21 @@ namespace roi  {
             {PacketID::GROUP107, 9}
         };
 
+        const std::map<PacketID, PacketID> Roomba::_packet_start = {
+            {PacketID::GROUP0, PacketID::BUMPS_WHEELDROPS},
+            {PacketID::GROUP1, PacketID::BUMPS_WHEELDROPS},
+            {PacketID::GROUP2, PacketID::IR_OPCODE},
+            {PacketID::GROUP3, PacketID::CHARGING_STATE},
+            {PacketID::GROUP4, PacketID::WALL_SIGNAL},
+            {PacketID::GROUP5, PacketID::OPEN_INTERFACE_MODE},
+            {PacketID::GROUP6, PacketID::BUMPS_WHEELDROPS},
+            {PacketID::GROUP100, PacketID::BUMPS_WHEELDROPS},
+            {PacketID::GROUP101, PacketID::ENCODER_COUNTS_RIGHT},
+            {PacketID::GROUP106, PacketID::LIGHT_BUMP_LEFT},
+            {PacketID::GROUP107, PacketID::LEFT_MOTOR_CURRENT}
+        };
+
+
     std::string Roomba::read_bytes(unsigned int count) {
 
         std::array<uint8_t, 1024> buf{};
@@ -427,7 +497,7 @@ namespace roi  {
             response.append(&buf[0], &buf[c]);
             //std::cout << "Read " << c << " bytes" << std::endl;
             if (c == count) {
-                print_packet(response);
+                //print_packet(response);
                 break;
             }
         }
@@ -440,9 +510,44 @@ namespace roi  {
             throw OIException("Unable to send packet. Serial port not open");
         }
         //std::cout << "Sending packet: ";
-        print_packet(p);
+        //print_packet(p);
         auto count = write(_port, p.c_str(), p.length());
         return count;
+    }
+
+    void Roomba::parse_sensor(std::string data) {
+        // We have the data packets, time to map them out
+        if (data.length() > 0) {
+            try {
+                // the first byte will tell us how big the packet is
+                PacketID packet = static_cast<PacketID>(data[0]);
+                auto len = _packet_len.at(packet);
+                //std::cout << "Packet: " << (int)data[0] << "\tLen: " << len << std::endl;
+                auto p = data.substr(1,len);
+
+                if (len > 2) {
+                    auto next = _packet_len.find(_packet_start.at(packet));
+                    // Requesting data a packet at a time is high byte first, while streaming is low byte first
+                    while (p.length() > 0) {
+                        _data_packets[next->first] = p.substr(0, next->second);
+                        //std::cout << (int)next->first << ": ";
+                        //print_packet(_data_packets[next->first]);
+                        //std::cout << "\t";
+                        p.erase(0, next->second);
+                        next++;
+                    }
+                    //std::cout << std::endl;
+                } else {
+                    _data_packets[packet] = p;
+                }
+
+            } catch (std::exception& e) {
+                //std::cout << "Well shit, hit a bump.\n" << e.what() << std::endl;
+            }
+        } else {
+
+            //std::cout << "Empty data" << std::endl;
+        }
     }
 
     bool Roomba::parse_response(std::string& response) {
@@ -454,7 +559,7 @@ namespace roi  {
             // Clear out any cruft
             response.erase(0, start);
             //std::cout << "Trimmed to: " << std::endl;
-            print_packet(response);
+            //print_packet(response);
             // Check how many bytes should be in the packet
             // The first byte is the start byte, and the second byte is the length of the data packets
             if (response.length() > 2) {
@@ -470,9 +575,8 @@ namespace roi  {
                     if ((cs & 0xFF) == 0) {
                         // We got a good packet
                         auto data = response.substr(2, packet_len);
-                        // We have the data packets, time to map them out
-                        //std::cout << "Packets:" << std::endl;
-                        print_packet(data);
+                        //print_packet(data);
+                        parse_sensor(data);
                         if (_callback) {
                             _data_count++;
                             _callback(*this);
@@ -482,7 +586,7 @@ namespace roi  {
                     }
                     response.erase(0, packet_len + 2);
                     //std::cout << "Trimmed again to: " << std::endl;
-                    print_packet(response);
+                    //print_packet(response);
                     return true;
                 }
             }
@@ -507,7 +611,7 @@ namespace roi  {
                         }
                         if (response.size() > 0) {
                             //std::cout << "Received response: ";
-                            print_packet(response);
+                            //print_packet(response);
                             while (parse_response(response)) {
                                 //std::cout << "Parsed a packet" << std::endl;
                             }

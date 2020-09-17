@@ -53,7 +53,7 @@ int main(int argc, const char* argv[]) {
 
 
         auto distance = roomba.get_distance();
-        auto angle = roomba.get_radius();
+        auto angle = roomba.get_angle();
         std::cout << "Starting at: " << distance << std::endl;
 
         distance = 0;
@@ -62,7 +62,7 @@ int main(int argc, const char* argv[]) {
         while ((distance < 0 ? -distance : distance) < 100) {
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
             distance += roomba.get_distance();
-            angle += roomba.get_radius();
+            angle += roomba.get_angle();
         }
         
         std::cout << "angle: " << angle << std::endl;

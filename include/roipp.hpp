@@ -74,7 +74,7 @@ namespace roi  {
         GROUP4,
         GROUP5,
         GROUP6,
-        BUMPS_WHEELDROPS,
+        BUMPS_WHEELDROPS = 7,
         WALL,
         CLIFF_LEFT,
         CLIFF_FRONT_LEFT,
@@ -217,6 +217,9 @@ namespace roi  {
         template <typename RetType>
         RetType sensor(PacketID id) {
             auto response = query(id);
+            if (response.length() == 0) {
+                return 0;
+            }
             // Unfortunately the data is sent high byte -> low byte so that means
             // that we need to reconstruct the value with shifting and masking
             RetType val = static_cast<uint8_t>(response[0]);
@@ -226,11 +229,81 @@ namespace roi  {
             return val;
         }
 
+        // Gets the bump sensors and wheel drops
+        uint8_t get_bump_wheel();
+
+        // Gets the right bump
+        bool get_right_bump();
+        // Gets the left bump
+        bool get_left_bump();
+        // Gets the right wheel drop
+        bool get_right_wheel_drop();
+        // Gets the left wheel drop
+        bool get_left_wheel_drop();
+
+        // Can the roomba see a wall?
+        bool get_wall();
+
+        // Gets the left cliff
+        bool get_cliff_left();
+        // Gets the left front cliff
+        bool get_cliff_front_left();
+        // Gets the right cliff
+        bool get_cliff_right();
+        // Gets the right front cliff
+        bool get_cliff_front_right();
+
+        // Can the roomba see a virtual wall?
+        bool get_virtual_wall();
+
+        // Returns the bits for overcurrent
+        uint8_t get_overcurrents();
+
+        // Check the overcurrent of the side brush
+        bool get_overcurrent_side_brush();
+        // Check the overcurrent of the main brush
+        bool get_overcurrent_main_brush();
+        // Check the overcurrent of the right wheel
+        bool get_overcurrent_right_wheel();
+        // Check the overcurrent of the left wheel
+        bool get_overcurrent_left_wheel();
+
+        // Get the dirt detect sensor from 0-255
+        uint8_t get_dirtdetect();
+
+        // Get the onmi direction IR character
+        uint8_t get_ir_code_omni();
+        // Get the lef tIR character
+        uint8_t get_ir_code_left();
+        // Get the right IR character
+        uint8_t get_ir_code_right();
+
+        // Get the buttons that are pressed
+        uint8_t get_buttons();
+
+        bool get_button_clean();
+        bool get_button_spot();
+        bool get_button_dock();
+        bool get_button_minute();
+        bool get_button_hour();
+        bool get_button_day();
+        bool get_button_schedule();
+        bool get_button_clock();
+
+        // Get the distance traveled since the last read
+        int16_t get_distance();
+
+        // Get the radius traveled since the last read
+        int16_t get_angle();
+
         // Returns the battery voltage in mV
         uint16_t get_voltage();
 
         // Returns the current in mA
-        uint16_t get_current();
+        int16_t get_current();
+
+        // Returns the temperature in C from -128 to 127
+        int8_t get_temp();
 
         // Returns the battery capacity in mAh
         uint16_t get_battery_capacity();
@@ -246,14 +319,6 @@ namespace roi  {
 
         // Returns if a song is playing or not
         bool get_song_playing();
-
-        // Get the distance traveled since the last read
-        // TODO If streaming, need to make sure we aren't just returning the same stuff every time
-        int16_t get_distance();
-
-        // Get the radius traveled since the last read
-        // TODO If streaming, need to make sure we aren't just returning the same stuff every time
-        int16_t get_radius();
 
         // Start streaming sensor data
         void stream_data(const std::vector<PacketID>& filter);
@@ -292,10 +357,12 @@ namespace roi  {
         bool _streaming;
 
         static const std::map<PacketID, unsigned int> _packet_len;
+        static const std::map<PacketID, PacketID> _packet_start;
 
         std::string read_bytes(unsigned int count);
 
         int send_packet(std::string p);
+        void parse_sensor(std::string data);
         bool parse_response(std::string& response);
 
         void create_read_thread();
