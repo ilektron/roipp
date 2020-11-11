@@ -33,3 +33,9 @@
 
 # CMake
 build
+
+# vscode
+.vscode
+
+# swp files
+*.swp

@@ -5,6 +5,9 @@
 #include <thread>
 #include <csignal>
 #include <curses.h>
+#include <boost/log/core.hpp>
+#include <boost/log/trivial.hpp>
+#include <boost/log/expressions.hpp>
 #include "../include/roipp.hpp"
 
 std::function<void(int)> shutdown_handler;
@@ -35,7 +38,11 @@ bool draw_data(roi::Roomba& bot) {
 
 void run_debug(roi::Roomba& bot) {
 
-IFNDEBUG(
+    boost::log::core::get()->set_filter
+    (
+        boost::log::trivial::severity >= boost::log::trivial::info
+    );
+
     auto win = initscr();
     cbreak();
     noecho();
@@ -43,56 +50,67 @@ IFNDEBUG(
 
     clear();
     mvaddstr(0, 0, "Roomba Debug");
-);
     // Could use a semaphore to signal to draw new data
     auto callback = [](roi::Roomba& bot){
         return draw_data(bot);
     };
 
-    bot.stream_data({roi::PacketID::GROUP0, roi::PacketID::OPEN_INTERFACE_MODE}, callback);
+    bot.stream_data({roi::PacketID::GROUP100}, callback);
 
     while (!stop) {
         // Do something, like read input
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         std::string text = "Voltage: " + std::to_string(bot.get_voltage()) + "mV";
-        IFNDEBUG(mvaddstr(1, 0, text.c_str()));
+        int line = 1;
+        mvaddstr(line++, 0, text.c_str());
         text = "Current: " + std::to_string(bot.get_current()) + "mA";
-        IFNDEBUG(mvaddstr(2, 0, text.c_str()));
+        mvaddstr(line++, 0, text.c_str());
         text = "Battery Charge: " + std::to_string(bot.get_battery_charge()) + "mAh";
-        IFNDEBUG(mvaddstr(3, 0, text.c_str()));
+        mvaddstr(line++, 0, text.c_str());
         text = "Battery Capacity: " + std::to_string(bot.get_battery_capacity()) + "mAh";
-        IFNDEBUG(mvaddstr(4, 0, text.c_str()));
+        mvaddstr(line++, 0, text.c_str());
         text = "Temperature: " + std::to_string(bot.get_temp()) + "C";
-        IFNDEBUG(mvaddstr(5, 0, text.c_str()));
+        mvaddstr(line++, 0, text.c_str());
         text = std::to_string(bot.get_bump_wheel()) + "\tLBumper: " + std::to_string(bot.get_left_bump());
         text += "\tRBumper: " + std::to_string(bot.get_right_bump());
-        IFNDEBUG(mvaddstr(6, 0, text.c_str()));
+        mvaddstr(line++, 0, text.c_str());
         text = "Left Wheel Drop: " + std::to_string(bot.get_left_wheel_drop());
         text += "\tRight Wheel Drop: " + std::to_string(bot.get_right_wheel_drop());
-        IFNDEBUG(mvaddstr(7, 0, text.c_str()));
+        mvaddstr(line++, 0, text.c_str());
         text = "Cliff: " + std::to_string(bot.get_cliff_left()) + "\t" + std::to_string(bot.get_cliff_front_left());
         text += "\t" + std::to_string(bot.get_cliff_front_right()) + "\t" + std::to_string(bot.get_cliff_right());
-        IFNDEBUG(mvaddstr(8, 0, text.c_str()));
+        mvaddstr(line++, 0, text.c_str());
+        text = "Light Bumper: " + std::to_string(bot.get_light_bumper()) + "  \t\t" + std::to_string(bot.get_light_bump_left());
+        text += "  \t" + std::to_string(bot.get_light_bump_front_left()) + "  \t" + std::to_string(bot.get_light_bump_center_left());
+        text += "  \t" + std::to_string(bot.get_light_bump_center_right()) + "  \t" + std::to_string(bot.get_light_bump_front_right());
+        text += "  \t" + std::to_string(bot.get_light_bump_right()) + "  ";
+        mvaddstr(line++, 0, text.c_str());
         text = "OI Mode: " + std::to_string(bot.get_oi_mode());
-        IFNDEBUG(mvaddstr(9, 0, text.c_str()));
-IFNDEBUG(
+        mvaddstr(line++, 0, text.c_str());
+        text = "Error count: " + std::to_string(bot.get_err_count());
+        mvaddstr(line++, 0, text.c_str());
+
         auto c = getch();
         switch (c) {
             case 'w':
                 bot.drive(100,0);
-                mvaddstr(15, 0, "forward");
+                mvaddstr(line, 0, "forward");
                 break;
             case 'a':
                 bot.drive(100,-1);
-                mvaddstr(15, 0, "left");
+                mvaddstr(line, 0, "left");
                 break;
             case 'd':
                 bot.drive(100,1);
-                mvaddstr(15, 0, "right");
+                mvaddstr(line, 0, "right");
+                break;
+            case 'm':
+                bot.safe();
+                mvaddstr(line, 0, "safe");
                 break;
             case 's':
-                bot.safe();
-                mvaddstr(15, 0, "safe");
+                bot.drive(-100,0);
+                mvaddstr(line, 0, "back");
                 break;
             case 'q':
                 bot.poweroff();
@@ -100,23 +118,30 @@ IFNDEBUG(
                 break;
             case 'f':
                 bot.full();
-                mvaddstr(15, 0, "full");
+                mvaddstr(line, 0, "full");
                 break;
             case 'l':
-                mvaddstr(15, 0, "leds");
+                mvaddstr(line, 0, "leds");
                 bot.leds(0, 255, 255);
                 break;
             case 'r':
                 bot.leds(0, 0, 255);
+                break;
+            case 'g':
+                mvaddstr(line, 0, "go");
+                bot.drive_direct(200,200);
+                while (!bot.get_light_bumper()){
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                bot.stop();
                 break;
             default:
                 bot.drive(0,0);
                 break;
         }
         refresh();
-        );
     }
-    IFNDEBUG(endwin());
+    endwin();
 }
 
 
@@ -125,7 +150,7 @@ IFNDEBUG(
 int main(int argc, const char* argv[]) {
     signal(SIGINT, signalHandler);
 
-    //try {
+    try {
         roi::Roomba roomba("/dev/ttyUSB0");
 
         // Set the shutdown handler
@@ -157,7 +182,8 @@ int main(int argc, const char* argv[]) {
 
 
         shutdown_handler(0);
-    //} catch (std::exception& e) {
-        //std::cout << "Fail: " << e.what() << std::endl;
-    //}
+    } catch (std::exception& e) {
+        BOOST_LOG_TRIVIAL(fatal) << "Encountered an error and had to quit";
+        BOOST_LOG_TRIVIAL(fatal) << e.what();
+    }
 }

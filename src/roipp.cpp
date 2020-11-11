@@ -1,10 +1,12 @@
 #include "../include/roipp.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 #include <iostream>
+#include <sstream>
 #include <exception>
 #include <thread>
 #include <atomic>
@@ -14,6 +16,7 @@
 #include <cerrno>
 #include <numeric>
 #include <functional>
+#include <fstream>
 
 // Should have an #ifdef for Arduino
 // Linux headers for serial port
@@ -21,24 +24,27 @@
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <unistd.h> // write(), read(), close()
 
+// Boost log library
+#include <boost/log/trivial.hpp>
 
 // Define the default tty if not defined elsewhere
 
 namespace roi  {
 
-    void print_packet(std::string packet) {
-        std::cout << std::hex;
+    std::string print_packet(std::string packet) {
+        std::stringstream ss;
+        ss << std::hex;
         for (auto c : packet) {
-            std::cout << "0x" << std::hex << std::setw(2) << std::setfill('0') << (static_cast<unsigned int>(c) & 0xFF) << " ";
+            ss << "0x" << std::hex << std::setw(2) << std::setfill('0') << (static_cast<unsigned int>(c) & 0xFF) << " ";
         }
-        std::cout << std::dec << std::endl;
+        return ss.str();
     }
 
     Roomba::Roomba() {
         Roomba(ROIPP_TTY);
     }
 
-    Roomba::Roomba(std::string port) : _cancel{}, _data_count{}, _streaming{} {
+    Roomba::Roomba(std::string port) : _cancel{}, _data_count{}, _streaming{}, _err_count{} {
         //std::cout << "Opening port: " << port << std::endl;
         _port = open(port.c_str(), O_RDWR);
         if (_port < 0) {
@@ -53,26 +59,12 @@ namespace roi  {
         }
 
         // TODO Make sure everything is configured correctly
-        tty.c_cflag |= CS8; // 8 bits per byte
-        tty.c_cflag &= ~CRTSCTS; // Disable RTS/CTS
-        tty.c_cflag &= ~PARENB; // No parity bit
-        tty.c_cflag &= ~CSTOPB; // 1 stop bit
-        tty.c_cflag |= CREAD | CLOCAL;  // Turn on READ & ignore ctrl lines (CLOCAL = 1)
-
-        tty.c_lflag &= ~ICANON; // Disable canonicle mode
-        tty.c_lflag &= ~ECHO;  // Disable echo
-        tty.c_lflag &= ~ECHOE; // Disable erasure
-        tty.c_lflag &= ~ECHONL; // Disable new-line echo
-
-        tty.c_iflag &= ~(IXON | IXOFF | IXANY); // Turn off s/w flow ctrl
-        tty.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL); // Disable any special handling of received bytes
-
-        tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
-        tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
+        cfmakeraw(&tty);
 
         tty.c_cc[VTIME] = 10;
         tty.c_cc[VMIN] = 0;
 
+        // Default baud for OI is 115200
         cfsetispeed(&tty, B115200);
         cfsetospeed(&tty, B115200);
 
@@ -85,9 +77,12 @@ namespace roi  {
         tcflush(_port, TCIOFLUSH);
 
         start();
-
-        // Start the read thread
     };
+
+    Roomba::Roomba(std::string port, unsigned int brc) : Roomba(port) {
+        setup_brc(brc);
+        toggle_brc();
+    }
 
     Roomba::~Roomba() {
         stop();
@@ -250,6 +245,7 @@ namespace roi  {
             if (_data_packets.find(id) != _data_packets.end()) {
                 return _data_packets[id];
             } else {
+                throw roi::OIException("Requested datapacket not found");
                 // Should throw exception?
                 return "";
             }
@@ -299,6 +295,38 @@ namespace roi  {
         return sensor<uint8_t>(PacketID::CLIFF_FRONT_RIGHT);
     }
 
+    // The light bumpers are an array of ir distance sensors on the front of the robot
+    uint8_t Roomba::get_light_bumper() {
+        return sensor<uint8_t>(PacketID::LIGHT_BUMPER);
+    }
+
+    uint16_t Roomba::get_light_bump_left() {
+        return sensor<uint16_t>(PacketID::LIGHT_BUMP_LEFT);
+    }
+    uint16_t Roomba::get_light_bump_front_left() {
+        return sensor<uint16_t>(PacketID::LIGHT_BUMP_FRONT_LEFT);
+    }
+    uint16_t Roomba::get_light_bump_center_left() {
+        return sensor<uint16_t>(PacketID::LIGHT_BUMP_CENTER_LEFT);
+    }
+    uint16_t Roomba::get_light_bump_center_right() {
+        return sensor<uint16_t>(PacketID::LIGHT_BUMP_CENTER_RIGHT);
+    }
+    uint16_t Roomba::get_light_bump_front_right() {
+        return sensor<uint16_t>(PacketID::LIGHT_BUMP_FRONT_RIGHT);
+    }
+    uint16_t Roomba::get_light_bump_right() {
+        return sensor<uint16_t>(PacketID::LIGHT_BUMP_RIGHT);
+    }
+
+    // Get the encoder values for the wheels
+    uint16_t Roomba::get_left_encoder() {
+        return sensor<uint16_t>(PacketID::ENCODER_COUNTS_LEFT);
+    }
+    // Get the encoder values for the wheels
+    uint16_t Roomba::get_right_encoder() {
+        return sensor<uint16_t>(PacketID::ENCODER_COUNTS_RIGHT);
+    }
 
     // Returns the battery voltage in mV
     uint16_t Roomba::get_voltage() {
@@ -413,6 +441,34 @@ namespace roi  {
         send_packet(p);
     }
 
+    void Roomba::setup_brc(int pin) {
+        _brc_pin = pin;
+        std::ofstream exports("/sys/class/gpio/export");
+        exports << pin << std::endl;
+        std::ofstream direction("/sys/class/gpio/gpio" + std::to_string(pin) + "/direction");
+        direction << "out" << std::endl;
+    }
+
+    void Roomba::toggle_brc() {
+        if (_brc_pin) {
+            std::ofstream gpio("/sys/class/gpio/gpio" + std::to_string(_brc_pin) + "/value");
+            gpio << "0" << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            gpio << "1" << std::endl;
+        } else {
+            throw OIException("No BRC pin initialized");
+        }
+    }
+
+    void Roomba::disable_brc() {
+        if (_brc_pin) {
+            std::ofstream unexports("/sys/class/gpio/unexport");
+            unexports << _brc_pin << std::endl;
+        } else {
+            throw OIException("No BRC pin initialized");
+        }
+        _brc_pin = 0;
+    }
 
     const std::map<PacketID, unsigned int> Roomba::_packet_len = {
             {PacketID::GROUP0, 26},
@@ -502,9 +558,8 @@ namespace roi  {
         std::string response{};
         while ((c += read(_port, buf.data(), count % buf.size())) <= count) {
             response.append(&buf[0], &buf[c]);
-            IFDEBUG(std::cout << "Read " << c << " bytes" << std::endl);
+            BOOST_LOG_TRIVIAL(trace) << "Read " << c << " bytes";
             if (c == count) {
-                //print_packet(response);
                 break;
             }
         }
@@ -516,8 +571,7 @@ namespace roi  {
         if (_port <=0 ) {
             throw OIException("Unable to send packet. Serial port not open");
         }
-        IFDEBUG(std::cout << "Sending packet: " << std::endl);
-        IFDEBUG(print_packet(p));
+        BOOST_LOG_TRIVIAL(trace) << "Sending packet: " << print_packet(p);
         auto count = write(_port, p.c_str(), p.length());
         return count;
     }
@@ -529,7 +583,7 @@ namespace roi  {
                 // the first byte will tell us how big the packet is
                 PacketID id = static_cast<PacketID>(data[0]);
                 auto len = _packet_len.at(id);
-                IFDEBUG(std::cout << "Packet: " << (int)data[0] << "\tLen: " << len << std::endl);
+                BOOST_LOG_TRIVIAL(trace) << "Packet: " << (int)data[0] << "\tLen: " << len;
                 auto p = data.substr(1,len);
                 data.erase(0, len+1);
 
@@ -538,19 +592,11 @@ namespace roi  {
                     // Requesting data a packet at a time is high byte first, while streaming is low byte first
                     while (p.length() > 0) {
                         _data_packets[next->first] = p.substr(0, next->second);
-                        IFDEBUG(
-                                std::cout << (int)next->first << ": ";
-                                print_packet(_data_packets[next->first]);
-                                std::cout << "\t";)
+                        BOOST_LOG_TRIVIAL(trace) << "Sensor: " << (int)next->first << ": " << print_packet(_data_packets[next->first]);
                         p.erase(0, next->second);
                         next++;
                     }
-                    IFDEBUG(std::cout << std::endl);
                 } else {
-                    IFDEBUG(
-                            std::cout << (int)id << ": ";
-                            print_packet(_data_packets[id]);
-                            std::cout << "\t";)
                     _data_packets[id] = p;
                     p.erase(0, len);
                 }
@@ -568,36 +614,36 @@ namespace roi  {
         if (start != std::string::npos) {
             //std::cout << "Found start byte at pos: " << start << std::endl;
             // Clear out any cruft
-            response.erase(0, start);
-            //std::cout << "Trimmed to: " << std::endl;
-            //print_packet(response);
+            if (start != 0) {
+                _err_count += start;
+            }
             // Check how many bytes should be in the packet
             // The first byte is the start byte, and the second byte is the length of the data packets
             if (response.length() > 2) {
                 unsigned int packet_len = static_cast<uint8_t>(response[1]);
-                //std::cout << "Should be long enough for packet length: " << packet_len << std::endl;
                 // n-bytes = start byte + packet len + len(data) + checksum
                 if (response.length() >= packet_len + 3) {
-                    IFDEBUG(std::cout << "Packet is complete" << std::endl);
+                    BOOST_LOG_TRIVIAL(trace) << "Packet is complete";
                     // Sum the bytes of the packet from start to checksum, should equal 0
                     auto cs = std::accumulate(response.begin(), response.begin() + packet_len + 3, 0);
-                    IFDEBUG(std::cout << "Checksum: " << cs << std::endl);
+                    BOOST_LOG_TRIVIAL(trace) << "Checksum: " << cs << std::endl;
                     // Validate the checksum
                     if ((cs & 0xFF) == 0) {
                         // We got a good packet
                         auto data = response.substr(2, packet_len);
-                        IFDEBUG(print_packet(data));
+                        BOOST_LOG_TRIVIAL(trace) << "Packet: " << print_packet(data);
                         parse_sensor(data);
                         if (_callback) {
                             _data_count++;
                             _callback(*this);
                         }
+                        response.erase(0, packet_len + 3);
                     } else {
+                        BOOST_LOG_TRIVIAL(error) << "BAD CRC!: " << cs;
+                        // Bad data, remove the front byte and try again
                         response = response.substr(1, response.length());
+                        _err_count++;
                     }
-                    response.erase(0, packet_len + 2);
-                    //std::cout << "Trimmed again to: " << std::endl;
-                    //print_packet(response);
                     return true;
                 }
             }
@@ -607,24 +653,24 @@ namespace roi  {
     }
 
     void Roomba::create_read_thread() {
+        int bytes_read;
+        //std::chrono::duration diff;
         _streaming = true;
         _read_thread = std::make_unique<std::thread>([&](){
-                std::array<uint8_t, 1024> buf;
+                std::array<char, 1024> buf;
                 std::string response;
                 while (!_cancel) {
                     auto c = read(_port, buf.data(), buf.size());
                     if (c > 0) {
-                        response.append(&buf[0], &buf[c]);
+                        response.append(static_cast<const char*>(buf.data()), c);
                         if (c) {
-                            IFDEBUG(std::cout << "Read " << c << " bytes" << std::endl);
+                            BOOST_LOG_TRIVIAL(trace) << "Read " << c << " bytes in stream";
                         } else {
-                            IFDEBUG(std::cout << "No data yet" << std::endl);
+                            BOOST_LOG_TRIVIAL(trace) << "No data yet";
                         }
                         if (response.size() > 0) {
-                            IFDEBUG(std::cout << "Received response: ";
-                                print_packet(response));
+                            BOOST_LOG_TRIVIAL(trace) << "Received response: " << print_packet(response);
                             while (parse_response(response)) {
-                                //std::cout << "Parsed a packet" << std::endl;
                             }
                         }
                     }

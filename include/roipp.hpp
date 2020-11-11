@@ -8,14 +8,6 @@
 #include <map>
 #include <functional>
 
-#ifdef DEBUG
-#define IFDEBUG(x_) {x_;}
-#define IFNDEBUG(x_) {}
-#else
-#define IFDEBUG(x_) {}
-#define IFNDEBUG(x_) {x_;}
-#endif
-
 namespace roi  {
 
     enum class Opcode : uint8_t {
@@ -176,6 +168,7 @@ namespace roi  {
 
         Roomba();
         Roomba(std::string port);
+        Roomba(std::string port, unsigned int brc);
         ~Roomba();
 
         // Sends the 'start command and initializes communication'
@@ -224,17 +217,20 @@ namespace roi  {
         // Get a sensor reading
         template <typename RetType>
         RetType sensor(PacketID id) {
-            auto response = query(id);
-            if (response.length() == 0) {
+            try {
+                auto response = query(id);
+
+                // Unfortunately the data is sent high byte -> low byte so that means
+                // that we need to reconstruct the value with shifting and masking
+                RetType val = static_cast<uint8_t>(response[0]);
+                for (auto i = 1u; i < sizeof(RetType); i++) {
+                    val = ((val << (sizeof(uint8_t) * 8)) & ~0xff) | static_cast<uint8_t>(response[i]);
+                }
+                return val;
+            }
+            catch (std::exception& e) {
                 return 0;
             }
-            // Unfortunately the data is sent high byte -> low byte so that means
-            // that we need to reconstruct the value with shifting and masking
-            RetType val = static_cast<uint8_t>(response[0]);
-            for (auto i = 1u; i < sizeof(RetType); i++) {
-                val = ((val << (sizeof(uint8_t) * 8)) & ~0xff) | static_cast<uint8_t>(response[i]);
-            }
-            return val;
         }
 
         // Gets the bump sensors and wheel drops
@@ -261,8 +257,23 @@ namespace roi  {
         // Gets the right front cliff
         bool get_cliff_front_right();
 
+        // Get the light bumper values
+        // The light bump is an array of IR distance sensor on the front of the robot
+        uint8_t get_light_bumper();
+
+        uint16_t get_light_bump_left();
+        uint16_t get_light_bump_front_left();
+        uint16_t get_light_bump_center_left();
+        uint16_t get_light_bump_center_right();
+        uint16_t get_light_bump_front_right();
+        uint16_t get_light_bump_right();
+
         // Can the roomba see a virtual wall?
         bool get_virtual_wall();
+
+        // Get the wheel encoder values
+        uint16_t get_left_encoder();
+        uint16_t get_right_encoder();
 
         // Returns the bits for overcurrent
         uint8_t get_overcurrents();
@@ -348,6 +359,15 @@ namespace roi  {
 
         void poweroff();
 
+        // The roombas have a pin that can wakeup the roomba from sleep
+        void setup_brc(int pin);
+        void toggle_brc();
+        void disable_brc();
+
+        // Helper utility functions
+        int get_err_count() { return _err_count; }
+
+
     private:
 
         // File descriptor for our serial port
@@ -366,6 +386,11 @@ namespace roi  {
         std::unique_ptr<std::thread> _read_thread;
         std::atomic_bool _cancel;
         bool _streaming;
+        int _err_count;
+        float _data_rate;
+
+        // Pin that can reset a roomba
+        unsigned int _brc_pin;
 
         static const std::map<PacketID, unsigned int> _packet_len;
         static const std::map<PacketID, PacketID> _packet_start;
