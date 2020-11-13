@@ -44,7 +44,7 @@ namespace roi  {
         Roomba(ROIPP_TTY);
     }
 
-    Roomba::Roomba(std::string port) : _cancel{}, _data_count{}, _streaming{}, _err_count{} {
+    Roomba::Roomba(std::string port) : _cancel{}, _data_count{}, _streaming{}, _err_count{}, _motors{} {
         //std::cout << "Opening port: " << port << std::endl;
         _port = open(port.c_str(), O_RDWR);
         if (_port < 0) {
@@ -209,9 +209,30 @@ namespace roi  {
         send_packet(p);
     }
 
-    void Roomba::motors() {
+    void Roomba::motors(uint8_t motors) {
+        _motors = motors;
         std::string p = {static_cast<const char>(Opcode::MOTORS)};
+        p.push_back(motors);
         send_packet(p);
+    }
+
+    void Roomba::motors(bool vacuum, bool main_dir, bool main_en, bool side_dir, bool side_en) {
+        motors( main_dir << 4 | side_dir << 3 | main_en << 2 | vacuum << 1 | side_en );
+    }
+
+    void Roomba::main_brush(bool dir, bool enable) {
+        _motors = (_motors & ~(1 << 4 | 1 << 2)) | dir << 4 | enable << 2;
+        motors(_motors);
+    }
+
+    void Roomba::side_brush(bool dir, bool enable) {
+        _motors = (_motors & ~(1 << 3 | 1 << 0)) | dir << 3 | enable << 0;
+        motors(_motors);
+    }
+
+    void Roomba::vacuum(bool enable) {
+        _motors = (_motors & ~(1 << 1)) |  enable << 1;
+        motors(_motors);
     }
 
     // Helper function that stops roomba after traveling a certain distance using PD controller

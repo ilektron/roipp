@@ -200,7 +200,12 @@ namespace roi  {
         // Drive the left and right motors directly from (-255 to 255)
         void drive_pwm(int right, int left);
 
-        void motors();
+        void motors(uint8_t motors);
+        void motors(bool vacuum, bool main_dir, bool main_en, bool side_dir, bool side_en);
+
+        void main_brush(bool dir, bool enable);
+        void side_brush(bool dir, bool enable);
+        void vacuum(bool enable);
 
         // Helper function that stops roomba after traveling a certain distance using PD controller
         void travel(int distance);
@@ -391,6 +396,9 @@ namespace roi  {
 
         // Pin that can reset a roomba
         unsigned int _brc_pin;
+
+        // Motor states so that we can track which motors should be on
+        uint8_t _motors;
 
         static const std::map<PacketID, unsigned int> _packet_len;
         static const std::map<PacketID, PacketID> _packet_start;

@@ -57,6 +57,10 @@ void run_debug(roi::Roomba& bot) {
 
     bot.stream_data({roi::PacketID::GROUP100}, callback);
 
+    bool vacuum{};
+    bool side_brush{};
+    bool main_brush{};
+
     while (!stop) {
         // Do something, like read input
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -91,6 +95,7 @@ void run_debug(roi::Roomba& bot) {
         mvaddstr(line++, 0, text.c_str());
 
         auto c = getch();
+        flushinp();
         switch (c) {
             case 'w':
                 bot.drive(100,0);
@@ -127,6 +132,14 @@ void run_debug(roi::Roomba& bot) {
             case 'r':
                 bot.leds(0, 0, 255);
                 break;
+            case 'v':
+                bot.vacuum(vacuum = !vacuum);
+                break;
+            case 'b':
+                bot.side_brush(true, side_brush = !side_brush);
+                break;
+            case 'n':
+                bot.side_brush(true, main_brush = !main_brush);
             case 'g':
                 mvaddstr(line, 0, "go");
                 bot.drive_direct(200,200);
